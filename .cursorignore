@@ -1,0 +1,267 @@
+# General: Ignore all hidden files and folders
+.*
+!/.cursorignore  # Keep this file tracked
+
+# Security and Credentials
+*.pem
+*.key
+*.crt
+*.der
+*.p12
+*.cer
+**/*aws_key*
+**/*aws_secret*
+**/*access_key*
+**/*secret_key*
+**/*secrets*
+**/*credentials*
+**/.env
+**/.env.*
+**/.env_*
+**/*.env
+**/env
+**/envs/*
+
+# IDE and OS Files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.lock
+
+# Logs
+*.log
+npm-debug.log
+yarn-error.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+bin/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# Python Virtual Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+pythonenv*
+
+# Python Testing
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+.nox/
+
+# Python Documentation
+docs/_build/
+docs/generated/
+site/
+.pdoc/
+.docusaurus
+
+# Python IDEs and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.spyproject/
+.spyderproject/
+.ropeproject/
+.pyre/
+.pytype/
+
+# Python Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# Python Package Managers
+pip-log.txt
+pip-delete-this-directory.txt
+poetry.lock
+.pdm.toml
+
+# Python Type Checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Python Linting and Formatting
+.pylintrc
+.flake8
+.style.yapf
+
+# General
+.DS_Store
+*.log
+.git/
+.gitignore
+
+# Project Secrets and Environment Variables
+.env*
+!.env.example
+*.pem
+*.key
+*.cert
+credentials.json
+config.json
+
+# Local Development
+local_settings.py
+db.sqlite3
+*.db
+*.sqlite3
+
+# Temporary Files
+*.bak
+*.swp
+*.tmp
+*~
+
+# Build and Distribution
+*.manifest
+*.spec
+.Python
+MANIFEST
+
+# Deployment
+deploy/
+aws/
+docker/
+catalog-info.yaml
+.github/
+
+# Database
+migrations/
+
+# Testing and Documentation
+coverage/
+.cache/
+CHANGELOG*
+MANIFEST*
+
+# Django & Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Django Specific
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+static/
+staticfiles/
+*.pot
+*.mo
+*.po
+
+# Django Development
+*.env
+.env
+.env.*
+!.env.example
+*.sqlite3
+migrations/*.py
+!migrations/__init__.py
+celerybeat-schedule
+celerybeat.pid
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE & Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# Testing & Coverage
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.hypothesis/
+cover/
+.nox/
+
+# Documentation
+docs/_build/
+docs/generated/
+site/
+
+# Packaging & Distribution
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+bin/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# Secrets & Keys
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+credentials.json
+secrets.json
+
+# Cache & Temporary
+.cache/
+*.bak
+*.tmp
+*~
+.sass-cache/
+node_modules/
+
+# Project Specific
+media_cdn/
+static_cdn/
+assets/
+collected_static/
+.pytest_cache/ 
