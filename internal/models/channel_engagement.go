@@ -4,10 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"os/exec"
-	"strconv"
-	"strings"
 	"time"
 )
 
@@ -52,66 +48,43 @@ func (d *Database) StoreEngagement(engagement *ChannelEngagement) error {
 	log.Printf("Storing engagement for channel %s, type %s", engagement.ChannelID, engagement.EngagementType)
 
 	// First check if a record exists with both channel_id AND engagement_type
-	checkSQL := fmt.Sprintf(`SELECT COUNT(*) FROM channel_engagement 
-		WHERE channel_id = '%s' AND engagement_type = '%s'`,
-		engagement.ChannelID, string(engagement.EngagementType))
+	checkSQL := `SELECT COUNT(*) FROM channel_engagement 
+				 WHERE channel_id = ? AND engagement_type = ?`
 
-	cmd := exec.Command(d.sqlitePath, d.dbPath, checkSQL)
-	output, err := cmd.CombinedOutput()
+	result, err := d.db.SelectArray(checkSQL, []interface{}{engagement.ChannelID, string(engagement.EngagementType)})
 	if err != nil {
-		log.Printf("Error checking existing record: %v, Output: %s", err, string(output))
+		log.Printf("Error checking existing record: %v", err)
 		return fmt.Errorf("failed to check existing record: %v", err)
 	}
 
-	// Convert output to string and trim whitespace
-	countStr := strings.TrimSpace(string(output))
-	count, err := strconv.Atoi(countStr)
+	count, err := result.GetInt64Value(0, 0)
 	if err != nil {
-		log.Printf("Error parsing count: %v", err)
-		return fmt.Errorf("failed to parse count: %v", err)
+		log.Printf("Error getting count: %v", err)
+		return fmt.Errorf("failed to get count: %v", err)
 	}
 
-	// Create a temporary file for the SQL command
-	tmpFile, err := os.CreateTemp("", "sqlite-*.sql")
-	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %v", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	// Escape the JSON response
-	escapedJSON := strings.ReplaceAll(string(engagement.JSONResponse), "'", "''")
-
-	// Write the SQL command to the temporary file
+	// Execute INSERT or UPDATE based on whether record exists
 	var sql string
+	var args []interface{}
+
 	if count > 0 {
 		log.Printf("Updating existing record for channel %s and type %s", engagement.ChannelID, engagement.EngagementType)
-		sql = fmt.Sprintf(`UPDATE channel_engagement 
-			SET json_response = '%s', update_date = CURRENT_TIMESTAMP
-			WHERE channel_id = '%s' AND engagement_type = '%s';`,
-			escapedJSON,
-			engagement.ChannelID,
-			string(engagement.EngagementType))
+		sql = `UPDATE channel_engagement 
+			   SET json_response = ?, update_date = CURRENT_TIMESTAMP
+			   WHERE channel_id = ? AND engagement_type = ?`
+		args = []interface{}{string(engagement.JSONResponse), engagement.ChannelID, string(engagement.EngagementType)}
 	} else {
 		log.Printf("Inserting new record for channel %s and type %s", engagement.ChannelID, engagement.EngagementType)
-		sql = fmt.Sprintf(`INSERT INTO channel_engagement 
-			(channel_id, engagement_type, json_response) 
-			VALUES ('%s', '%s', '%s');`,
-			engagement.ChannelID,
-			string(engagement.EngagementType),
-			escapedJSON)
+		sql = `INSERT INTO channel_engagement 
+			   (channel_id, engagement_type, json_response) 
+			   VALUES (?, ?, ?)`
+		args = []interface{}{engagement.ChannelID, string(engagement.EngagementType), string(engagement.JSONResponse)}
 	}
 
-	if _, err := tmpFile.WriteString(sql); err != nil {
-		return fmt.Errorf("failed to write SQL to temporary file: %v", err)
-	}
-	tmpFile.Close()
-
-	// Execute the SQL command using the temporary file
-	cmd = exec.Command(d.sqlitePath, d.dbPath, ".read "+tmpFile.Name())
-	output, err = cmd.CombinedOutput()
+	err = d.db.ExecuteArray(sql, args)
 	if err != nil {
-		log.Printf("Error storing engagement: %v, Output: %s", err, string(output))
-		return fmt.Errorf("failed to store engagement: %v, Output: %s", err, string(output))
+		log.Printf("Error storing engagement: %v", err)
+		return fmt.Errorf("failed to store engagement: %v", err)
 	}
 
 	log.Printf("Successfully stored engagement")
@@ -120,57 +93,68 @@ func (d *Database) StoreEngagement(engagement *ChannelEngagement) error {
 
 // GetLatestEngagement retrieves the latest engagement record for a channel and type
 func (d *Database) GetLatestEngagement(channelID string, engagementType EngagementType) (*ChannelEngagement, error) {
-	sql := fmt.Sprintf(`SELECT id, channel_id, engagement_type, create_date, update_date, json_response 
-		FROM channel_engagement 
-		WHERE channel_id = '%s' AND engagement_type = '%s'
-		ORDER BY create_date DESC LIMIT 1`,
-		channelID, engagementType)
+	sql := `SELECT id, channel_id, engagement_type, create_date, update_date, json_response 
+			FROM channel_engagement 
+			WHERE channel_id = ? AND engagement_type = ?
+			ORDER BY create_date DESC LIMIT 1`
 
-	cmd := exec.Command(d.sqlitePath, d.dbPath, sql)
-	output, err := cmd.CombinedOutput()
+	result, err := d.db.SelectArray(sql, []interface{}{channelID, string(engagementType)})
 	if err != nil {
-		// If no rows found, return nil without error
-		if strings.Contains(string(output), "no such table") || strings.Contains(string(output), "no rows") {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to get latest engagement: %v, Output: %s", err, string(output))
+		return nil, fmt.Errorf("failed to get latest engagement: %v", err)
 	}
 
-	// Parse the output line by line
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) == 0 {
-		return nil, nil
-	}
-
-	// Parse the first line which contains our data
-	fields := strings.Split(lines[0], "|")
-	if len(fields) != 6 {
-		return nil, fmt.Errorf("invalid number of fields in output: %d", len(fields))
+	if result.GetNumberOfRows() == 0 {
+		return nil, nil // No record found
 	}
 
 	// Parse the fields
-	id, err := strconv.ParseInt(strings.TrimSpace(fields[0]), 10, 64)
+	id, err := result.GetInt64Value(0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse id: %v", err)
 	}
 
-	createDate, err := time.Parse("2006-01-02 15:04:05", strings.TrimSpace(fields[3]))
+	channelIDValue, err := result.GetStringValue(0, 1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse channel_id: %v", err)
+	}
+
+	engagementTypeValue, err := result.GetStringValue(0, 2)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse engagement_type: %v", err)
+	}
+
+	createDateStr, err := result.GetStringValue(0, 3)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse create_date: %v", err)
 	}
 
-	updateDate, err := time.Parse("2006-01-02 15:04:05", strings.TrimSpace(fields[4]))
+	updateDateStr, err := result.GetStringValue(0, 4)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse update_date: %v", err)
+	}
+
+	jsonResponse, err := result.GetStringValue(0, 5)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse json_response: %v", err)
+	}
+
+	createDate, err := time.Parse("2006-01-02 15:04:05", createDateStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse create_date: %v", err)
+	}
+
+	updateDate, err := time.Parse("2006-01-02 15:04:05", updateDateStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse update_date: %v", err)
 	}
 
 	engagement := &ChannelEngagement{
 		ID:             id,
-		ChannelID:      strings.TrimSpace(fields[1]),
-		EngagementType: EngagementType(strings.TrimSpace(fields[2])),
+		ChannelID:      channelIDValue,
+		EngagementType: EngagementType(engagementTypeValue),
 		CreateDate:     createDate,
 		UpdateDate:     updateDate,
-		JSONResponse:   json.RawMessage(strings.TrimSpace(fields[5])),
+		JSONResponse:   json.RawMessage(jsonResponse),
 	}
 
 	return engagement, nil
@@ -179,34 +163,48 @@ func (d *Database) GetLatestEngagement(channelID string, engagementType Engageme
 // UpdateEngagement updates an existing engagement record
 func (d *Database) UpdateEngagement(engagement *ChannelEngagement) error {
 	sql := `UPDATE channel_engagement 
-		SET json_response = ?, update_date = CURRENT_TIMESTAMP 
-		WHERE channel_id = ? AND engagement_type = ?`
+			SET json_response = ?, update_date = CURRENT_TIMESTAMP 
+			WHERE channel_id = ? AND engagement_type = ?`
 
-	cmd := exec.Command(d.sqlitePath, d.dbPath, sql,
-		string(engagement.JSONResponse),
-		engagement.ChannelID,
-		string(engagement.EngagementType))
-
-	return cmd.Run()
+	return d.db.ExecuteArray(sql, []interface{}{string(engagement.JSONResponse), engagement.ChannelID, string(engagement.EngagementType)})
 }
 
 // GetEngagementHistory retrieves the engagement history for a channel and type
 func (d *Database) GetEngagementHistory(channelID string, engagementType EngagementType, limit int) ([]*ChannelEngagement, error) {
-	sql := fmt.Sprintf(`SELECT id, channel_id, engagement_type, create_date, update_date, json_response 
-		FROM channel_engagement 
-		WHERE channel_id = '%s' AND engagement_type = '%s'
-		ORDER BY create_date DESC LIMIT %d`,
-		channelID, engagementType, limit)
+	sql := `SELECT id, channel_id, engagement_type, create_date, update_date, json_response 
+			FROM channel_engagement 
+			WHERE channel_id = ? AND engagement_type = ?
+			ORDER BY create_date DESC LIMIT ?`
 
-	cmd := exec.Command(d.sqlitePath, d.dbPath, sql)
-	output, err := cmd.Output()
+	result, err := d.db.SelectArray(sql, []interface{}{channelID, string(engagementType), limit})
 	if err != nil {
 		return nil, err
 	}
 
 	var engagements []*ChannelEngagement
-	if err := json.Unmarshal(output, &engagements); err != nil {
-		return nil, err
+	rowCount := result.GetNumberOfRows()
+
+	for r := uint64(0); r < rowCount; r++ {
+		id, _ := result.GetInt64Value(r, 0)
+		channelIDValue, _ := result.GetStringValue(r, 1)
+		engagementTypeValue, _ := result.GetStringValue(r, 2)
+		createDateStr, _ := result.GetStringValue(r, 3)
+		updateDateStr, _ := result.GetStringValue(r, 4)
+		jsonResponse, _ := result.GetStringValue(r, 5)
+
+		createDate, _ := time.Parse("2006-01-02 15:04:05", createDateStr)
+		updateDate, _ := time.Parse("2006-01-02 15:04:05", updateDateStr)
+
+		engagement := &ChannelEngagement{
+			ID:             id,
+			ChannelID:      channelIDValue,
+			EngagementType: EngagementType(engagementTypeValue),
+			CreateDate:     createDate,
+			UpdateDate:     updateDate,
+			JSONResponse:   json.RawMessage(jsonResponse),
+		}
+		engagements = append(engagements, engagement)
 	}
+
 	return engagements, nil
 }

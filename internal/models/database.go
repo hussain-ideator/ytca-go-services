@@ -3,56 +3,57 @@ package models
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
+	"log"
+	"strings"
+
+	sqlitecloud "github.com/sqlitecloud/sqlitecloud-go"
 )
 
 // Database represents the database connection and operations
 type Database struct {
-	dbPath     string
-	sqlitePath string
+	db *sqlitecloud.SQCloud
 }
 
 // NewDatabase creates a new database connection
 func NewDatabase(dbPath string) (*Database, error) {
-	// Get the current working directory
-	wd, err := os.Getwd()
+	log.Printf("Connecting to SQLite Cloud database: %s", maskConnectionString(dbPath))
+
+	// Connect to SQLite Cloud
+	db, err := sqlitecloud.Connect(dbPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to connect to SQLite Cloud: %v", err)
 	}
 
-	// Construct the path to the SQLite executable
-	sqlitePath := filepath.Join(wd, "..", "sqlite", "sqlite3.exe")
-
-	// Check if SQLite executable exists
-	if _, err := os.Stat(sqlitePath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("SQLite executable not found at %s", sqlitePath)
-	}
-
-	db := &Database{
-		dbPath:     dbPath,
-		sqlitePath: sqlitePath,
+	database := &Database{
+		db: db,
 	}
 
 	// Create tables if they don't exist
-	if err := db.createTables(); err != nil {
+	if err := database.createTables(); err != nil {
 		return nil, err
 	}
 
-	return db, nil
+	return database, nil
 }
 
-// executeSQL executes a SQL command using the SQLite3 executable
+// maskConnectionString hides the API key in logs for security
+func maskConnectionString(connStr string) string {
+	if strings.Contains(connStr, "apikey=") {
+		parts := strings.Split(connStr, "apikey=")
+		if len(parts) > 1 {
+			return parts[0] + "apikey=***"
+		}
+	}
+	return connStr
+}
+
+// executeSQL executes a SQL command using SQLite Cloud
 func (d *Database) executeSQL(sql string, args ...interface{}) error {
-	// Format the SQL command with arguments
-	formattedSQL := fmt.Sprintf(sql, args...)
-
-	// Create the command
-	cmd := exec.Command(d.sqlitePath, d.dbPath, formattedSQL)
-
-	// Execute the command
-	return cmd.Run()
+	// Use SQLite Cloud's Execute method for DDL/DML operations
+	if len(args) > 0 {
+		return d.db.ExecuteArray(sql, args)
+	}
+	return d.db.Execute(sql)
 }
 
 // createTables creates the necessary tables if they don't exist
@@ -98,10 +99,10 @@ func (d *Database) StoreAnalytics(channelID, channelName string, analytics *Chan
 		return err
 	}
 
-	return d.executeSQL(`
-		INSERT INTO channel_analytics (channel_id, channel_name, analytics_data)
-		VALUES (?, ?, ?)
-	`, channelID, channelName, string(data))
+	sql := `INSERT INTO channel_analytics (channel_id, channel_name, analytics_data)
+			VALUES (?, ?, ?)`
+
+	return d.db.ExecuteArray(sql, []interface{}{channelID, channelName, string(data)})
 }
 
 // StoreTrends stores channel trends data
@@ -111,27 +112,34 @@ func (d *Database) StoreTrends(channelID, channelName string, trends *ChannelTre
 		return err
 	}
 
-	return d.executeSQL(`
-		INSERT INTO channel_trends (channel_id, channel_name, trends_data)
-		VALUES (?, ?, ?)
-	`, channelID, channelName, string(data))
+	sql := `INSERT INTO channel_trends (channel_id, channel_name, trends_data)
+			VALUES (?, ?, ?)`
+
+	return d.db.ExecuteArray(sql, []interface{}{channelID, channelName, string(data)})
 }
 
 // GetLatestAnalytics retrieves the latest analytics for a channel
 func (d *Database) GetLatestAnalytics(channelID string) (*ChannelAnalytics, error) {
-	sql := fmt.Sprintf(`SELECT analytics_data FROM channel_analytics 
-		WHERE channel_id = '%s' 
-		ORDER BY created_at DESC LIMIT 1`,
-		channelID)
+	sql := `SELECT analytics_data FROM channel_analytics 
+			WHERE channel_id = ? 
+			ORDER BY created_at DESC LIMIT 1`
 
-	cmd := exec.Command(d.sqlitePath, d.dbPath, sql)
-	output, err := cmd.Output()
+	result, err := d.db.SelectArray(sql, []interface{}{channelID})
+	if err != nil {
+		return nil, err
+	}
+
+	if result.GetNumberOfRows() == 0 {
+		return nil, fmt.Errorf("no analytics found for channel %s", channelID)
+	}
+
+	analyticsData, err := result.GetStringValue(0, 0)
 	if err != nil {
 		return nil, err
 	}
 
 	var analytics ChannelAnalytics
-	if err := json.Unmarshal(output, &analytics); err != nil {
+	if err := json.Unmarshal([]byte(analyticsData), &analytics); err != nil {
 		return nil, err
 	}
 	return &analytics, nil
@@ -139,19 +147,26 @@ func (d *Database) GetLatestAnalytics(channelID string) (*ChannelAnalytics, erro
 
 // GetLatestTrends retrieves the latest trends for a channel
 func (d *Database) GetLatestTrends(channelID string) (*ChannelTrends, error) {
-	sql := fmt.Sprintf(`SELECT trends_data FROM channel_trends 
-		WHERE channel_id = '%s' 
-		ORDER BY created_at DESC LIMIT 1`,
-		channelID)
+	sql := `SELECT trends_data FROM channel_trends 
+			WHERE channel_id = ? 
+			ORDER BY created_at DESC LIMIT 1`
 
-	cmd := exec.Command(d.sqlitePath, d.dbPath, sql)
-	output, err := cmd.Output()
+	result, err := d.db.SelectArray(sql, []interface{}{channelID})
+	if err != nil {
+		return nil, err
+	}
+
+	if result.GetNumberOfRows() == 0 {
+		return nil, fmt.Errorf("no trends found for channel %s", channelID)
+	}
+
+	trendsData, err := result.GetStringValue(0, 0)
 	if err != nil {
 		return nil, err
 	}
 
 	var trends ChannelTrends
-	if err := json.Unmarshal(output, &trends); err != nil {
+	if err := json.Unmarshal([]byte(trendsData), &trends); err != nil {
 		return nil, err
 	}
 	return &trends, nil
@@ -159,6 +174,8 @@ func (d *Database) GetLatestTrends(channelID string) (*ChannelTrends, error) {
 
 // Close closes the database connection
 func (d *Database) Close() error {
-	// No need to close anything as we're using the executable directly
+	if d.db != nil {
+		return d.db.Close()
+	}
 	return nil
 }
