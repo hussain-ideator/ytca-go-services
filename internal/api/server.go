@@ -31,7 +31,7 @@ func NewServer(cfg *config.Config) *Server {
 		allowedOrigins := map[string]bool{
 			"http://localhost:3000": true,
 			"http://localhost:3001": true,
-			"https://ytca-frontend.vercel.app/": true,
+			"https://ytca-frontend.vercel.app": true,
 		}
 
 		// Always set CORS headers for preflight requests
